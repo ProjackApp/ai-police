@@ -78,14 +78,12 @@ function SrsRtcPublisherAsync() {
                 api: conf.apiUrl, tid: conf.tid, streamurl: conf.streamUrl,
                 clientip: null, sdp: offer.sdp
             };
-            console.log("Generated offer: ", data);
 
             const xhr = new XMLHttpRequest();
             xhr.onload = function() {
                 if (xhr.readyState !== xhr.DONE) return;
                 if (xhr.status !== 200 && xhr.status !== 201) return reject(xhr);
                 const data = JSON.parse(xhr.responseText);
-                console.log("Got answer: ", data);
                 return data.code ? reject(xhr) : resolve(data);
             }
             xhr.open('POST', conf.apiUrl, true);
@@ -313,14 +311,12 @@ function SrsRtcPlayerAsync() {
                 api: conf.apiUrl, tid: conf.tid, streamurl: conf.streamUrl,
                 clientip: null, sdp: offer.sdp
             };
-            console.log("Generated offer: ", data);
 
             const xhr = new XMLHttpRequest();
             xhr.onload = function() {
                 if (xhr.readyState !== xhr.DONE) return;
                 if (xhr.status !== 200 && xhr.status !== 201) return reject(xhr);
                 const data = JSON.parse(xhr.responseText);
-                console.log("Got answer: ", data);
                 return data.code ? reject(xhr) : resolve(data);
             }
             xhr.open('POST', conf.apiUrl, true);
@@ -561,14 +557,12 @@ function SrsRtcWhipWhepAsync() {
         var offer = await self.pc.createOffer();
         await self.pc.setLocalDescription(offer);
         const answer = await new Promise(function (resolve, reject) {
-            console.log(`Generated offer: ${offer.sdp}`);
 
             const xhr = new XMLHttpRequest();
             xhr.onload = function() {
                 if (xhr.readyState !== xhr.DONE) return;
                 if (xhr.status !== 200 && xhr.status !== 201) return reject(xhr);
                 const data = xhr.responseText;
-                console.log("Got answer: ", data);
                 return data.code ? reject(xhr) : resolve(data);
             }
             xhr.open('POST', url, true);
@@ -598,14 +592,12 @@ function SrsRtcWhipWhepAsync() {
         var offer = await self.pc.createOffer();
         await self.pc.setLocalDescription(offer);
         const answer = await new Promise(function(resolve, reject) {
-            console.log(`Generated offer: ${offer.sdp}`);
 
             const xhr = new XMLHttpRequest();
             xhr.onload = function() {
                 if (xhr.readyState !== xhr.DONE) return;
                 if (xhr.status !== 200 && xhr.status !== 201) return reject(xhr);
                 const data = xhr.responseText;
-                console.log("Got answer: ", data);
                 return data.code ? reject(xhr) : resolve(data);
             }
             xhr.open('POST', url, true);
