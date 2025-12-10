@@ -3,7 +3,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useMicVAD } from '@ricky0123/vad-react';
 
-import { FullHistoryDisplay } from './History';
 import { VoiceWave } from './Voice';
 import standby from '../assets/police.mp4';
 
@@ -278,7 +277,7 @@ export default function VoiceTextAI(): React.ReactElement {
           </div>
         )}
 
-        <FullHistoryDisplay history={history} />
+        {/* <FullHistoryDisplay history={history} /> */}
 
         {/* MUTE BUTTON */}
         <div className="absolute bottom-0 w-full p-6 flex justify-center z-40">
