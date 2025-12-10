@@ -5,6 +5,7 @@ import { useMicVAD } from '@ricky0123/vad-react';
 
 import { VoiceWave } from './Voice';
 import standby from '../assets/police.mp4';
+import { jsPDF } from 'jspdf';
 
 type Chat = { sender: 'user' | 'ai'; message: string };
 
@@ -13,18 +14,20 @@ declare global {
     SrsRtcWhipWhepAsync: any;
     slotSessionId: number;
     dbSessionId: string;
-    startConnection?: any; // function dari client.js
+    startConnection?: any;
   }
 }
 
 export default function VoiceTextAI(): React.ReactElement {
   const [listening, setListening] = useState(false);
   const [muted, setMuted] = useState<any>(false);
-  const [history, setHistory] = useState<Chat[]>([]);
+  const [_history, setHistory] = useState<Chat[]>([]);
   const [connected, setConnected] = useState<any>(false);
 
   const [slotSessionId, setSlotSessionId] = useState<number | null>(null);
   const [dbSessionId, setDbSessionId] = useState<string | null>(null);
+  const [sessionSummary, setSessionSummary] = useState<string | null>(null);
+  const [showModal, setShowModal] = useState(false);
 
   const recognitionRef = useRef<any>(null);
   const avatarVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -34,32 +37,28 @@ export default function VoiceTextAI(): React.ReactElement {
   const vadRef = useRef<any>(null);
 
   // ==========================
-  // CEK SESSION DARI client.js
+  // CEK SESSION
   // ==========================
   const checkSessionFromWindow = async () => {
-    // 1) User + Slot
     const name = (
       (document.getElementById('username') as HTMLInputElement)?.value || 'Anonymous'
     ).trim();
+
     const slot = parseInt(
       (document.getElementById('whep-slot') as HTMLInputElement)?.value || '0',
       10
     );
     setSlotSessionId(slot);
 
-    // 2) Create DB Session
     const s = await fetch('https://live.divtik.xyz/start_session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_name: name }),
     });
 
-    if (!s.ok) {
-      return;
-    }
+    if (!s.ok) return;
 
     const sj = await s.json();
-    // update UI
     setDbSessionId(sj.session_id);
   };
 
@@ -75,9 +74,9 @@ export default function VoiceTextAI(): React.ReactElement {
     setHistory(prev => [...prev, { sender: 'ai', message: text }]);
   };
 
-  // ============================================
-  // SEND TO SERVER —— TYPE: CHAT (REAL AI)
-  // ============================================
+  // ============================
+  // SEND CHAT KE SERVER
+  // ============================
   const sendChatToServer = async (text: string) => {
     try {
       const res = await fetch('https://live.divtik.xyz/human', {
@@ -87,8 +86,6 @@ export default function VoiceTextAI(): React.ReactElement {
           text,
           type: 'chat',
           interrupt: true,
-
-          // === PENTING ===
           sessionid: slotSessionId,
           db_session_id: dbSessionId,
         }),
@@ -130,7 +127,7 @@ export default function VoiceTextAI(): React.ReactElement {
   }, [vad]);
 
   // =======================
-  // Speech Recognition
+  // SPEECH RECOGNITION
   // =======================
   useEffect(() => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -205,9 +202,32 @@ export default function VoiceTextAI(): React.ReactElement {
   };
 
   // =======================
+  // END SESSION
+  // =======================
+  const stopSessionAndGetSummary = async () => {
+    if (!dbSessionId) return null;
+
+    try {
+      const res = await fetch('https://live.divtik.xyz/end_session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: dbSessionId }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (data?.summary) return data.summary;
+    } catch (e) {
+      console.error('Error end_session:', e);
+    }
+
+    return null;
+  };
+
+  // =======================
   // STOP CONNECTION
   // =======================
-  const handleStop = () => {
+  const handleStop = async () => {
     setConnected(false);
     recognitionRef.current?.stop();
     window.speechSynthesis.cancel();
@@ -220,6 +240,28 @@ export default function VoiceTextAI(): React.ReactElement {
       avatarVideoRef.current.pause();
       avatarVideoRef.current.srcObject = null;
     }
+
+    // === END_SESSION
+    const summary = await stopSessionAndGetSummary();
+    if (summary) {
+      setSessionSummary(summary);
+      setShowModal(true);
+    }
+
+    setDbSessionId(null);
+  };
+
+  // =======================
+  // DOWNLOAD PDF
+  // =======================
+  const downloadSummaryPDF = () => {
+    if (!sessionSummary) return;
+
+    const doc = new jsPDF();
+    doc.setFontSize(12);
+    doc.text('Session Summary:', 10, 10);
+    doc.text(sessionSummary, 10, 20);
+    doc.save('summary.pdf');
   };
 
   const toggleMute = () => {
@@ -242,6 +284,7 @@ export default function VoiceTextAI(): React.ReactElement {
     <div className="w-full min-h-screen bg-gray-900 flex justify-center items-center p-4">
       <div className="w-full max-w-sm h-[90vh] relative bg-gray-800 rounded-[2.5rem] overflow-hidden shadow-2xl">
         {/* AVATAR VIDEO */}
+
         <video
           ref={avatarVideoRef}
           src={!connected ? standby : ''}
@@ -253,19 +296,33 @@ export default function VoiceTextAI(): React.ReactElement {
         />
 
         {/* TOP BAR */}
+        {/* TOP BAR */}
         <div className="absolute top-0 left-0 w-full p-5 flex justify-between items-center z-40">
           <div className="bg-blue-600/80 text-white px-3 py-1 rounded-full text-xs">
             {connected ? (muted ? 'Online (Muted)' : 'Online (Listening)') : 'Offline'}
           </div>
 
-          <button
-            onClick={connected ? handleStop : handleStart}
-            className={`px-4 py-1 rounded-full text-white text-xs ${
-              connected ? 'bg-red-500' : 'bg-green-500'
-            }`}
-          >
-            {connected ? 'Stop' : 'Start'}
-          </button>
+          <div className="flex items-center gap-2">
+            {/* BUTTON START/STOP */}
+            <button
+              onClick={connected ? handleStop : handleStart}
+              className={`px-4 py-1 rounded-full text-white text-xs ${
+                connected ? 'bg-red-500' : 'bg-green-500'
+              }`}
+            >
+              {connected ? 'Stop' : 'Start'}
+            </button>
+
+            {/* BUTTON TAMPILKAN SUMMARY */}
+            {sessionSummary && (
+              <button
+                onClick={() => setShowModal(true)}
+                className="px-4 py-1 rounded-full text-white text-xs bg-purple-600"
+              >
+                Summary
+              </button>
+            )}
+          </div>
         </div>
 
         {!muted && listening && <VoiceWave />}
@@ -276,8 +333,6 @@ export default function VoiceTextAI(): React.ReactElement {
             </span>
           </div>
         )}
-
-        {/* <FullHistoryDisplay history={history} /> */}
 
         {/* MUTE BUTTON */}
         <div className="absolute bottom-0 w-full p-6 flex justify-center z-40">
@@ -299,6 +354,35 @@ export default function VoiceTextAI(): React.ReactElement {
           </button>
         </div>
       </div>
+
+      {/* MODAL SUMMARY */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 w-80 shadow-xl text-black">
+            <h2 className="text-lg font-bold mb-2">Session Summary</h2>
+
+            <div className="bg-gray-100 p-3 rounded max-h-60 overflow-auto text-sm whitespace-pre-wrap">
+              {sessionSummary}
+            </div>
+
+            <div className="flex justify-between mt-4">
+              <button
+                onClick={() => setShowModal(false)}
+                className="px-4 py-2 bg-gray-400 text-white rounded"
+              >
+                Close
+              </button>
+
+              <button
+                onClick={downloadSummaryPDF}
+                className="px-4 py-2 bg-blue-600 text-white rounded"
+              >
+                Download PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
