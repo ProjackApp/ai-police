@@ -6,7 +6,6 @@ import { useMicVAD } from '@ricky0123/vad-react';
 import { VoiceWave } from './Voice';
 import standby from '../assets/police.mp4';
 import { jsPDF } from 'jspdf';
-import { FullHistoryDisplay } from './History';
 
 type Chat = { sender: 'user' | 'ai'; message: string };
 
@@ -16,13 +15,15 @@ declare global {
     slotSessionId: number;
     dbSessionId: string;
     startConnection?: any;
+    SpeechRecognition: any;
+    webkitSpeechRecognition: any;
   }
 }
 
 export default function VoiceTextAI(): React.ReactElement {
   const [listening, setListening] = useState(false);
   const [muted, setMuted] = useState<any>(false);
-  const [history, setHistory] = useState<Chat[]>([]);
+  const [history, setHistory] = useState<Chat[]>([]); // State untuk menampilkan teks di layar
   const [connected, setConnected] = useState<any>(false);
 
   const [slotSessionId, setSlotSessionId] = useState<number | null>(null);
@@ -32,14 +33,20 @@ export default function VoiceTextAI(): React.ReactElement {
 
   const recognitionRef = useRef<any>(null);
   const avatarVideoRef = useRef<HTMLVideoElement | null>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null); // Untuk auto-scroll
 
   const srsRef = useRef<any>(null);
   const canRestartRecognition = useRef(true);
   const vadRef = useRef<any>(null);
 
-  //------------------------------------------------------
+  // Auto-scroll saat ada chat baru
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [history]);
+
+  // ==========================
   // CEK SESSION
-  //------------------------------------------------------
+  // ==========================
   const checkSessionFromWindow = async () => {
     const name = (
       (document.getElementById('username') as HTMLInputElement)?.value || 'Anonymous'
@@ -49,7 +56,6 @@ export default function VoiceTextAI(): React.ReactElement {
       (document.getElementById('whep-slot') as HTMLInputElement)?.value || '0',
       10
     );
-
     setSlotSessionId(slot);
 
     const s = await fetch('https://live.divtik.xyz/start_session', {
@@ -68,24 +74,40 @@ export default function VoiceTextAI(): React.ReactElement {
     checkSessionFromWindow();
   }, []);
 
-  //------------------------------------------------------
-  // AI SPEAK (TTS DARI BROWSER)
-  //------------------------------------------------------
+  // =======================
+  // AI Speak (Tampilkan Teks AI)
+  // =======================
   const speakAI = (text: string) => {
     window.speechSynthesis.cancel();
 
-    const utter = new SpeechSynthesisUtterance(text);
-    utter.lang = 'id-ID';
-    utter.rate = 1;
-
-    window.speechSynthesis.speak(utter);
-
+    // MENAMPILKAN TEKS AI KE LAYAR
     setHistory(prev => [...prev, { sender: 'ai', message: text }]);
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'id-ID';
+
+    utterance.onstart = () => {
+      recognitionRef.current?.stop();
+    };
+
+    utterance.onend = () => {
+      setTimeout(() => {
+        if (connected && !muted) {
+          try {
+            recognitionRef.current?.start();
+          } catch (e) {
+            console.error('Error starting recognition after AI speak:', e);
+          }
+        }
+      }, 500);
+    };
+
+    window.speechSynthesis.speak(utterance);
   };
 
-  //------------------------------------------------------
-  // KIRIM CHAT KE API
-  //------------------------------------------------------
+  // ============================
+  // SEND CHAT KE SERVER
+  // ============================
   const sendChatToServer = async (text: string) => {
     try {
       const res = await fetch('https://live.divtik.xyz/human', {
@@ -101,34 +123,29 @@ export default function VoiceTextAI(): React.ReactElement {
       });
 
       const data = await res.json();
-      const reply = data.msg || 'Tidak ada respons dari server';
+      // Ambil balasan dari server (sesuaikan dengan key JSON server Anda)
+      const reply = data.msg || data.reply || '';
 
-      // speakAI(reply);
+      if (reply) {
+        speakAI(reply);
+      }
     } catch (err) {
-      speakAI('Maaf, aku mengalami gangguan.');
+      speakAI('Maaf, aku mengalami gangguan koneksi.');
     }
   };
 
-  //------------------------------------------------------
-  // VAD + ANC (SUPAYA SUARA AI TIDAK TERTANGKAP MIC)
-  //------------------------------------------------------
+  // =======================
+  // VAD
+  // =======================
   const vad = useMicVAD({
     getStream: async () => {
-      return await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      return await navigator.mediaDevices.getUserMedia({ audio: true });
     },
-
     onSpeechStart: () => {
       canRestartRecognition.current = false;
       window.speechSynthesis.cancel();
       recognitionRef.current?.stop();
     },
-
     onSpeechEnd: () => {
       setTimeout(() => {
         canRestartRecognition.current = true;
@@ -143,9 +160,9 @@ export default function VoiceTextAI(): React.ReactElement {
     vadRef.current = vad;
   }, [vad]);
 
-  //------------------------------------------------------
-  // SPEECH RECOGNITION
-  //------------------------------------------------------
+  // =======================
+  // SPEECH RECOGNITION (Tampilkan Teks User)
+  // =======================
   useEffect(() => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SR) return;
@@ -159,8 +176,17 @@ export default function VoiceTextAI(): React.ReactElement {
 
     rec.onend = () => {
       setListening(false);
-      if (connected && !muted && canRestartRecognition.current) {
-        setTimeout(() => rec.start(), 200);
+      if (
+        !window.speechSynthesis.speaking &&
+        connected &&
+        !muted &&
+        canRestartRecognition.current
+      ) {
+        setTimeout(() => {
+          try {
+            rec.start();
+          } catch {}
+        }, 200);
       }
     };
 
@@ -171,6 +197,7 @@ export default function VoiceTextAI(): React.ReactElement {
       }
       if (!text) return;
 
+      // MENAMPILKAN TEKS USER KE LAYAR
       setHistory(prev => [...prev, { sender: 'user', message: text }]);
       sendChatToServer(text);
     };
@@ -184,12 +211,11 @@ export default function VoiceTextAI(): React.ReactElement {
     };
   }, [connected, muted]);
 
-  //------------------------------------------------------
-  // START WHEP (MATIKAN AUDIO STREAM AGAR MIC TIDAK MENANGKAP)
-  //------------------------------------------------------
+  // =======================
+  // START / STOP / WHEP
+  // =======================
   const handleStart = async () => {
     setConnected(true);
-
     const WHEP = window.SrsRtcWhipWhepAsync;
     if (!WHEP) {
       setConnected(false);
@@ -199,64 +225,34 @@ export default function VoiceTextAI(): React.ReactElement {
     try {
       const sdk = new WHEP();
       srsRef.current = sdk;
-
       const video = avatarVideoRef.current;
-      video.srcObject = sdk.stream;
-
-      // MATIKAN AUDIO TRACK VIDEO (SUPAYA SUARA AI TIDAK MASUK MIC)
-      sdk.stream?.getAudioTracks()?.forEach(t => (t.enabled = false));
-
-      video.muted = false; // video tetap hidup, tapi tanpa suara dari stream
-
-      await sdk.play('https://live.divtik.xyz/whep/');
-      await video.play().catch(() => {});
+      if (video) {
+        video.srcObject = sdk.stream;
+        video.muted = false;
+        await sdk.play('https://live.divtik.xyz/whep/');
+        await video.play().catch(() => {});
+      }
     } catch (err) {
       setConnected(false);
       return;
     }
 
-    setTimeout(() => {
-      try {
-        recognitionRef.current?.start();
-      } catch {}
-    }, 400);
-  };
-
-  //------------------------------------------------------
-  // END SESSION
-  //------------------------------------------------------
-  const stopSessionAndGetSummary = async () => {
-    if (!dbSessionId) return null;
-
-    try {
-      const res = await fetch('https://live.divtik.xyz/end_session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: dbSessionId }),
-      });
-
-      const data = await res.json().catch(() => ({}));
-
-      if (data?.summary) return data.summary;
-    } catch (e) {
-      console.error('Error end_session:', e);
+    if (!muted) {
+      setTimeout(() => {
+        try {
+          recognitionRef.current?.start();
+        } catch {}
+      }, 400);
     }
-
-    return null;
   };
 
-  //------------------------------------------------------
-  // STOP CONNECTION
-  //------------------------------------------------------
   const handleStop = async () => {
     setConnected(false);
     recognitionRef.current?.stop();
     window.speechSynthesis.cancel();
-
     try {
       srsRef.current?.close();
     } catch {}
-
     if (avatarVideoRef.current) {
       avatarVideoRef.current.pause();
       avatarVideoRef.current.srcObject = null;
@@ -267,26 +263,33 @@ export default function VoiceTextAI(): React.ReactElement {
       setSessionSummary(summary);
       setShowModal(true);
     }
-
     setDbSessionId(null);
   };
 
-  //------------------------------------------------------
-  // DOWNLOAD PDF
-  //------------------------------------------------------
+  const stopSessionAndGetSummary = async () => {
+    if (!dbSessionId) return null;
+    try {
+      const res = await fetch('https://live.divtik.xyz/end_session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: dbSessionId }),
+      });
+      const data = await res.json();
+      return data?.summary || null;
+    } catch (e) {
+      return null;
+    }
+  };
+
   const downloadSummaryPDF = () => {
     if (!sessionSummary) return;
-
     const doc = new jsPDF();
-    doc.setFontSize(12);
+    const splitText = doc.splitTextToSize(sessionSummary, 180);
     doc.text('Session Summary:', 10, 10);
-    doc.text(sessionSummary, 10, 20);
+    doc.text(splitText, 10, 20);
     doc.save('summary.pdf');
   };
 
-  //------------------------------------------------------
-  // MUTE BUTTON
-  //------------------------------------------------------
   const toggleMute = () => {
     setMuted((prev: any) => {
       const next = !prev;
@@ -294,71 +297,91 @@ export default function VoiceTextAI(): React.ReactElement {
         recognitionRef.current?.stop();
         window.speechSynthesis.cancel();
       } else {
-        setTimeout(() => recognitionRef.current?.start(), 400);
+        if (!window.speechSynthesis.speaking) {
+          setTimeout(() => recognitionRef.current?.start(), 400);
+        }
       }
       return next;
     });
   };
 
-  //------------------------------------------------------
-  // UI
-  //------------------------------------------------------
   return (
-    <div className="w-full min-h-screen bg-gray-900 flex justify-center items-center p-4">
-      <div className="w-full max-w-sm h-[90vh] relative bg-gray-800 rounded-[2.5rem] overflow-hidden shadow-2xl">
+    <div className="w-full min-h-screen bg-gray-900 flex justify-center items-center p-4 font-sans text-white">
+      <div className="w-full max-w-sm h-[90vh] relative bg-gray-800 rounded-[2.5rem] overflow-hidden shadow-2xl border-4 border-gray-700">
+        {/* AVATAR VIDEO */}
         <video
           ref={avatarVideoRef}
           src={!connected ? standby : ''}
           autoPlay
           loop
-          muted={false}
+          muted={!connected}
           playsInline
-          className="absolute inset-0 w-full h-full object-cover opacity-90"
+          className="absolute inset-0 w-full h-full object-cover opacity-80"
         />
 
-        <div className="absolute top-0 left-0 w-full p-5 flex justify-between items-center z-40">
-          <div className="bg-blue-600/80 text-white px-3 py-1 rounded-full text-xs">
-            {connected ? (muted ? 'Online (Muted)' : 'Online (Listening)') : 'Offline'}
-          </div>
+        {/* GRADIENT OVERLAY (Agar teks terbaca) */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/40 pointer-events-none" />
 
-          <div className="flex items-center gap-2">
+        {/* TOP STATUS BAR */}
+        <div className="absolute top-0 left-0 w-full p-6 flex justify-between items-center z-50">
+          <div
+            className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+              connected ? 'bg-green-500 animate-pulse' : 'bg-red-500'
+            }`}
+          >
+            {connected ? (muted ? 'Muted' : 'Live') : 'Offline'}
+          </div>
+          <div className="flex gap-2">
             <button
               onClick={connected ? handleStop : handleStart}
-              className={`px-4 py-1 rounded-full text-white text-xs ${
-                connected ? 'bg-red-500' : 'bg-green-500'
+              className={`px-4 py-1 rounded-full text-xs font-bold transition ${
+                connected ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'
               }`}
             >
-              {connected ? 'Stop' : 'Start'}
+              {connected ? 'End Call' : 'Start'}
             </button>
-
-            {sessionSummary && (
-              <button
-                onClick={() => setShowModal(true)}
-                className="px-4 py-1 rounded-full text-white text-xs bg-purple-600"
-              >
-                Summary
-              </button>
-            )}
           </div>
         </div>
 
-        {!muted && listening && <VoiceWave />}
-        {!muted && vad.userSpeaking && (
-          <div className="absolute bottom-36 w-full text-center z-50">
-            <span className="bg-black/60 text-white px-4 py-1 rounded-full text-xs">
-              Mendengarkan...
-            </span>
+        {/* CHAT DISPLAY (Overlay Teks di Layar) */}
+        <div className="absolute bottom-32 w-full px-4 max-h-[40%] overflow-y-auto z-40 flex flex-col gap-3 no-scrollbar">
+          {history.map((chat, index) => (
+            <div
+              key={index}
+              className={`flex ${chat.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+            >
+              <div
+                className={`max-w-[85%] px-4 py-2 rounded-2xl text-sm shadow-lg ${
+                  chat.sender === 'user'
+                    ? 'bg-blue-600/90 text-white rounded-br-none border border-blue-400/30'
+                    : 'bg-white/90 text-gray-900 rounded-bl-none border border-gray-200'
+                }`}
+              >
+                {chat.message}
+              </div>
+            </div>
+          ))}
+          <div ref={chatEndRef} />
+        </div>
+
+        {/* VOICE INDICATOR */}
+        {!muted && (listening || vad.userSpeaking) && (
+          <div className="absolute bottom-24 left-0 w-full flex justify-center z-50">
+            <div className="flex items-center gap-2 bg-black/40 backdrop-blur-md px-3 py-1 rounded-full">
+              <div className="w-2 h-2 bg-red-500 rounded-full animate-ping" />
+              <span className="text-[10px] font-medium">Mendengarkan...</span>
+            </div>
           </div>
         )}
 
-        <FullHistoryDisplay history={history} />
-
-        {/* MUTE BUTTON */}
-        <div className="absolute bottom-0 w-full p-6 flex justify-center z-40">
+        {/* CONTROLS */}
+        <div className="absolute bottom-0 w-full p-6 flex justify-center items-center gap-6 z-50 bg-gradient-to-t from-black/60 to-transparent">
           <button
             onClick={toggleMute}
-            className={`w-14 h-14 rounded-full text-white flex items-center justify-center ${
-              muted ? 'bg-gray-600' : 'bg-blue-600'
+            className={`w-14 h-14 rounded-full flex items-center justify-center transition shadow-xl ${
+              muted
+                ? 'bg-red-500 shadow-red-500/20'
+                : 'bg-white/10 backdrop-blur-md hover:bg-white/20'
             }`}
           >
             {muted ? (
@@ -403,27 +426,24 @@ export default function VoiceTextAI(): React.ReactElement {
 
       {/* MODAL SUMMARY */}
       {showModal && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl p-6 w-80 shadow-xl text-black">
-            <h2 className="text-lg font-bold mb-2">Session Summary</h2>
-
-            <div className="bg-gray-100 p-3 rounded max-h-60 overflow-auto text-sm whitespace-pre-wrap">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+          <div className="bg-gray-800 border border-gray-700 rounded-3xl p-6 w-full max-w-md shadow-2xl">
+            <h2 className="text-xl font-bold mb-4 text-blue-400">Ringkasan Sesi</h2>
+            <div className="bg-gray-900/50 rounded-xl p-4 max-h-60 overflow-auto text-sm leading-relaxed text-gray-300 border border-gray-700">
               {sessionSummary}
             </div>
-
-            <div className="flex justify-between mt-4">
+            <div className="flex gap-3 mt-6">
               <button
                 onClick={() => setShowModal(false)}
-                className="px-4 py-2 bg-gray-400 text-white rounded"
+                className="flex-1 py-3 bg-gray-700 rounded-xl font-bold hover:bg-gray-600 transition"
               >
-                Close
+                Tutup
               </button>
-
               <button
                 onClick={downloadSummaryPDF}
-                className="px-4 py-2 bg-blue-600 text-white rounded"
+                className="flex-1 py-3 bg-blue-600 rounded-xl font-bold hover:bg-blue-500 transition"
               >
-                Download PDF
+                Simpan PDF
               </button>
             </div>
           </div>
