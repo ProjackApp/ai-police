@@ -397,13 +397,6 @@ export default function VoiceTextAI(): React.ReactElement {
               </svg>
             )}
           </button>
-          <button
-            onClick={() => {
-              throw new Error('errro baru lagi menggunakan env!');
-            }}
-          >
-            Break the world
-          </button>
         </div>
       </div>
 
