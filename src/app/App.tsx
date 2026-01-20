@@ -7,6 +7,7 @@ import { VoiceWave } from './Voice';
 import standby from '../assets/police.mp4';
 import { jsPDF } from 'jspdf';
 import { FullHistoryDisplay } from './History';
+import { API_PROD } from '../config/api';
 type Chat = { sender: 'user' | 'ai'; message: string };
 
 declare global {
@@ -52,7 +53,7 @@ export default function VoiceTextAI(): React.ReactElement {
 
     setSlotSessionId(slot);
 
-    const s = await fetch('https://live.divtik.xyz/start_session', {
+    const s = await fetch(`${API_PROD}/start_session`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_name: name }),
@@ -110,7 +111,7 @@ export default function VoiceTextAI(): React.ReactElement {
   //------------------------------------------------------
   const sendChatToServer = async (text: string) => {
     try {
-      const res = await fetch('https://live.divtik.xyz/human', {
+      const res = await fetch(`${API_PROD}/human`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -230,7 +231,7 @@ export default function VoiceTextAI(): React.ReactElement {
 
       video.muted = false; // video tetap hidup, tapi tanpa suara dari stream
 
-      await sdk.play('https://live.divtik.xyz/whep/');
+      await sdk.play(`${API_PROD}/whep/`);
       await video.play().catch(() => {});
     } catch (err) {
       setConnected(false);
@@ -251,7 +252,7 @@ export default function VoiceTextAI(): React.ReactElement {
     if (!dbSessionId) return null;
 
     try {
-      const res = await fetch('https://live.divtik.xyz/end_session', {
+      const res = await fetch(`${API_PROD}/end_session`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: dbSessionId }),
