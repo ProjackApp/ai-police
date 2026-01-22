@@ -517,6 +517,9 @@ export default function VoiceTextAI(): React.ReactElement {
     });
   };
 
+  console.log('API_PROD:', API_PROD);
+  console.log('ENV:', import.meta.env);
+
   //------------------------------------------------------
   // UI
   //------------------------------------------------------
