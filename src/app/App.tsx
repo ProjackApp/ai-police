@@ -7,6 +7,9 @@ import { VoiceWave } from './Voice';
 import standby from '../assets/police.mp4';
 import { jsPDF } from 'jspdf';
 import { FullHistoryDisplay } from './History';
+import { API_PROD } from '../config/api';
+import Logo from '../assets/logo.png';
+
 type Chat = { sender: 'user' | 'ai'; message: string };
 
 declare global {
@@ -52,7 +55,7 @@ export default function VoiceTextAI(): React.ReactElement {
 
     setSlotSessionId(slot);
 
-    const s = await fetch('https://live.divtik.xyz/start_session', {
+    const s = await fetch(`${API_PROD}/start_session`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ user_name: name }),
@@ -110,7 +113,7 @@ export default function VoiceTextAI(): React.ReactElement {
   //------------------------------------------------------
   const sendChatToServer = async (text: string) => {
     try {
-      const res = await fetch('https://live.divtik.xyz/human', {
+      const res = await fetch(`${API_PROD}/human`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -230,7 +233,7 @@ export default function VoiceTextAI(): React.ReactElement {
 
       video.muted = false; // video tetap hidup, tapi tanpa suara dari stream
 
-      await sdk.play('https://live.divtik.xyz/whep/');
+      await sdk.play(`${API_PROD}/whep/`);
       await video.play().catch(() => {});
     } catch (err) {
       setConnected(false);
@@ -251,7 +254,7 @@ export default function VoiceTextAI(): React.ReactElement {
     if (!dbSessionId) return null;
 
     try {
-      const res = await fetch('https://live.divtik.xyz/end_session', {
+      const res = await fetch(`${API_PROD}/end_session`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: dbSessionId }),
@@ -296,14 +299,206 @@ export default function VoiceTextAI(): React.ReactElement {
   //------------------------------------------------------
   // DOWNLOAD PDF
   //------------------------------------------------------
-  const downloadSummaryPDF = () => {
-    if (!sessionSummary) return;
+  const renderMarkdownLikeText = (
+    doc: jsPDF,
+    text: string,
+    startX: number,
+    startY: number,
+    maxWidth: number
+  ) => {
+    const lines = text.split('\n');
+    let y = startY;
 
-    const doc = new jsPDF();
-    doc.setFontSize(12);
-    doc.text('Session Summary:', 10, 10);
-    doc.text(sessionSummary, 10, 20);
-    doc.save('summary.pdf');
+    lines.forEach(line => {
+      if (!line.trim()) {
+        y += 6;
+        return;
+      }
+
+      // split **bold**
+      const parts = line.split(/(\*\*[^*]+\*\*)/g);
+      let x = startX;
+
+      parts.forEach(part => {
+        if (!part) return;
+
+        if (part.startsWith('**') && part.endsWith('**')) {
+          const boldText = part.replace(/\*\*/g, '');
+          doc.setFont('times', 'bold');
+          doc.text(boldText, x, y);
+          x += doc.getTextWidth(boldText);
+        } else {
+          doc.setFont('times', 'normal');
+
+          const wrapped = doc.splitTextToSize(part, maxWidth - (x - startX));
+          wrapped.forEach((w: string, i: number) => {
+            if (i > 0) {
+              y += 6;
+              x = startX;
+            }
+            doc.text(w, x, y);
+            x += doc.getTextWidth(w);
+          });
+        }
+      });
+
+      y += 6;
+    });
+
+    return y;
+  };
+
+  const loadImage = (src: string): Promise<HTMLImageElement> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.src = src;
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+    });
+  };
+
+  const normalizeReporterName = (rawName?: string) => {
+    if (!rawName) return 'TIDAK DIKETAHUI';
+
+    let name = rawName.trim();
+
+    if (!name) return 'TIDAK DIKETAHUI';
+
+    // Rapikan spasi
+    name = name.replace(/\s+/g, ' ');
+
+    // Kapitalisasi setiap kata
+    name = name
+      .split(' ')
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(' ');
+
+    return name.toUpperCase();
+  };
+
+  const getIndonesianDateTimeText = () => {
+    const now = new Date();
+
+    const hari = now.toLocaleDateString('id-ID', { weekday: 'long' });
+    const tanggal = now.toLocaleDateString('id-ID', {
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+    });
+    const jam = now.toLocaleTimeString('id-ID', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    return { hari, tanggal, jam };
+  };
+
+  //------------------------------------------------------
+  // DOWNLOAD PDF DENGAN FORMAT RESMI
+  //------------------------------------------------------
+
+  const drawHeaderC1 = async (doc: jsPDF) => {
+    let y = 15;
+
+    // Header Kiri
+    doc.setFont('times', 'bold');
+    doc.setFontSize(10);
+    doc.text('KEPOLISIAN NEGARA REPUBLIK INDONESIA', 15, y);
+    y += 5;
+    doc.text('RESOR TARAKAN', 50, y, { align: 'center' });
+    y += 5;
+    doc.text('SEKTOR TARAKAN BARAT', 50, y, { align: 'center' });
+    y += 5;
+    doc.setFont('times', 'normal');
+    doc.setFontSize(9);
+    doc.text('Jl. Jendral Sudirman Tarakan 77111', 50, y, { align: 'center' });
+
+    // Garis Header Kiri
+    doc.setLineWidth(0.5);
+    doc.line(15, y + 2, 95, y + 2);
+
+    // Model C-1 Kanan Atas
+    doc.setFont('times', 'bold');
+    doc.setFontSize(10);
+    doc.text('MODEL "C-1"', 190, 15, { align: 'right' });
+    y += 15;
+
+    // Logo (Simulasi Bintang/Logo)
+    // Jika Anda punya URL gambar logo, gunakan doc.addImage
+    // === LOGO ===
+    const img = await loadImage(Logo);
+
+    const logoWidth = 25;
+    const logoHeight = 25;
+    const centerX = (210 - logoWidth) / 2; // A4 width = 210mm
+
+    doc.addImage(img, 'PNG', centerX, y, logoWidth, logoHeight);
+
+    y += logoHeight;
+    // Placeholder Logo Bintang
+    y += 5;
+
+    // Judul Surat
+    doc.setFontSize(11);
+    doc.setFont('times', 'bold');
+    const title = 'SURA PENERIMAAN LAPORAN KEHILANGAN BARANG';
+    doc.text(title, 105, y, { align: 'center' });
+    // Garis bawah judul
+    const titleWidth = doc.getTextWidth(title);
+    doc.line(105 - titleWidth / 2, y + 1, 105 + titleWidth / 2, y + 1);
+
+    y += 6;
+    doc.text('NOMOR POLISI : STPL/04/B/XI/2004 SPK', 105, y, { align: 'center' });
+
+    return y + 10; // Jarak ke isi
+  };
+
+  const downloadSummaryPDF = async () => {
+    if (!sessionSummary) return;
+    const { hari, tanggal, jam } = getIndonesianDateTimeText();
+
+    const doc = new jsPDF('p', 'mm', 'a4');
+
+    let currentY = await drawHeaderC1(doc);
+
+    // 2. Pembuka Dokumen
+    doc.setFont('times', 'italic');
+    doc.setFontSize(10);
+
+    const openingText = `Yang bertanda tangan dibawah ini menerangkan bahwa pada hari ${hari} tanggal ${tanggal} sekitar jam ${jam} WIB telah datang ke Polda Metro Jaya seorang warga Indonesia mengaku:`;
+
+    const splitOpening = doc.splitTextToSize(openingText, 165);
+    doc.text(splitOpening, 25, currentY);
+
+    currentY += splitOpening.length * 5 + 5;
+
+    // 3. Isi Summary (Data Pelapor & Kejadian)
+    // Tips: Pastikan sessionSummary dari backend sudah rapi atau lakukan split di sini
+    doc.setFont('times', 'normal');
+    const finalY = renderMarkdownLikeText(doc, sessionSummary, 25, currentY, 160);
+
+    // 4. Bagian Tanda Tangan Pelapor
+    let footerY = finalY + 20;
+
+    // Cek jika footer keluar dari halaman
+    if (footerY > 250) {
+      doc.addPage();
+      footerY = 20;
+    }
+
+    doc.setFont('times', 'bold');
+    doc.text('PELAPOR', 35, footerY, { align: 'center' });
+
+    footerY += 30; // Ruang tanda tangan
+
+    // Nama Pelapor (Ambil dari input atau default)
+    const rawReporterName = (document.getElementById('username') as HTMLInputElement)?.value;
+    const reporterName = normalizeReporterName(rawReporterName);
+
+    doc.text(reporterName.toUpperCase(), 40, footerY, { align: 'center' });
+    doc.line(20, footerY + 1, 60, footerY + 1); // Garis bawah nama
+
+    doc.save(`Summary_Laporan_${new Date().getTime()}.pdf`);
   };
 
   //------------------------------------------------------
