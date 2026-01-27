@@ -7,7 +7,7 @@ import { VoiceWave } from './Voice';
 import standby from '../assets/police.mp4';
 import { jsPDF } from 'jspdf';
 import { FullHistoryDisplay } from './History';
-import { API_PROD } from '../config/api';
+import { API_PROD, WHEP_URL } from '../config/api';
 import Logo from '../assets/logo.png';
 
 type Chat = { sender: 'user' | 'ai'; message: string };
@@ -223,6 +223,7 @@ export default function VoiceTextAI(): React.ReactElement {
 
     try {
       const sdk = new WHEP();
+
       srsRef.current = sdk;
 
       const video = avatarVideoRef.current;
@@ -233,7 +234,7 @@ export default function VoiceTextAI(): React.ReactElement {
 
       video.muted = false; // video tetap hidup, tapi tanpa suara dari stream
 
-      await sdk.play(`${API_PROD}/whep/`);
+      await sdk.play(`${WHEP_URL}`);
       await video.play().catch(() => {});
     } catch (err) {
       setConnected(false);
@@ -516,9 +517,6 @@ export default function VoiceTextAI(): React.ReactElement {
       return next;
     });
   };
-
-  console.log('API_PROD:', API_PROD);
-  console.log('ENV:', import.meta.env);
 
   //------------------------------------------------------
   // UI
